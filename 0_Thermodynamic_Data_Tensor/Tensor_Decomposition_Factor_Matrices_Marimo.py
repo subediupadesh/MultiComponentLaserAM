@@ -602,7 +602,7 @@ def _(mo):
         label="ALS iterations",
     )
     run_cpd_button = mo.ui.run_button(
-        label="🚀 Run Factor Matrix CPD for LIQUID and FCC"
+        label="🚀 Run Factorization"
     )
 
     controls_panel = mo.sidebar(
