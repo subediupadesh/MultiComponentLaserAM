@@ -221,8 +221,8 @@ jobs:
               <div class="buttons">
                 <a class="button" href="./8D_ParallelPlot.html">💡 8D TDT Viz</a>
                 <a class="button" href="./Sunburst_Multiring.html">🌞 Multi-Ring Chart</a>
-                <a class="button" href="./Tensor_Factorization.html">🧪 TensorFactorization</a>
-                <a class="button" href="./ML_Predictions.html">🎛️ Attention Surrogate</a>
+                <a class="button" href="./Tensor_Factorization.html">🎛️ TensorFactorization</a>
+                <a class="button" href="./ML_Predictions.html">🧪 Attention Surrogate</a>
               </div>
 
               <div class="sub">
