@@ -64,32 +64,99 @@ def _(mo):
 
 
 @app.cell
-def _(glob, linalg, make_subplots, np, os, pd, go):
-    def load_all_data(csv_dir: str) -> pd.DataFrame:
-        files = sorted(glob.glob(os.path.join(csv_dir, "Gibbs_*K.csv")))
-        if not files:
-            raise FileNotFoundError(
-                f"No Gibbs CSV files found in: {csv_dir}\n"
-                "Expected files such as Gibbs_300K.csv, Gibbs_700K.csv, Gibbs_800K.csv, ..."
-            )
+def _(io, linalg, make_subplots, np, os, pd, go):
+    REQUIRED_COLUMNS = ["Co", "Cr", "Fe", "Ni", "G_LIQ", "G_FCC"]
+
+    def safe_numeric(value, fallback):
+        try:
+            if value is None:
+                return fallback
+            if isinstance(value, str) and value.strip() == "":
+                return fallback
+            return value
+        except Exception:
+            return fallback
+
+    def clean_gibbs_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+        missing_columns = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        df = df[REQUIRED_COLUMNS].copy()
+
+        for column in REQUIRED_COLUMNS:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+        df = df.dropna(subset=REQUIRED_COLUMNS)
+        df["sum_x"] = df["Co"] + df["Cr"] + df["Fe"] + df["Ni"]
+        df = df[np.abs(df["sum_x"] - 1.0) < 1e-6].copy()
+
+        if df.empty:
+            raise ValueError("No valid rows after enforcing Co + Cr + Fe + Ni = 1.")
+
+        return df.drop(columns=["sum_x"])
+
+    def load_all_data(
+        csv_folder_value: str,
+        T_min_value: int = 300,
+        T_max_value: int = 3300,
+        T_step_value: int = 100,
+    ) -> pd.DataFrame:
+        temperatures_to_try = list(
+            range(int(T_min_value), int(T_max_value) + 1, int(T_step_value))
+        )
 
         frames = []
         skipped = []
-        for path in files:
-            name = os.path.basename(path)
+
+        csv_folder_value = str(csv_folder_value).strip().rstrip("/")
+
+        try:
+            from pyodide.http import open_url
+            running_in_wasm = True
+        except ImportError:
+            open_url = None
+            running_in_wasm = False
+
+        for temperature in temperatures_to_try:
+            filename = f"Gibbs_{temperature}K.csv"
+
+            if running_in_wasm:
+                file_path = f"{csv_folder_value}/{filename}"
+                try:
+                    csv_text = open_url(file_path).read()
+                    tmp = pd.read_csv(io.StringIO(csv_text))
+                except Exception as exc:
+                    skipped.append(f"{file_path} [browser read error: {exc}]")
+                    continue
+            else:
+                if csv_folder_value.startswith("http://") or csv_folder_value.startswith("https://"):
+                    file_path = f"{csv_folder_value}/{filename}"
+                else:
+                    file_path = os.path.join(csv_folder_value, filename)
+
+                try:
+                    tmp = pd.read_csv(file_path)
+                except Exception as exc:
+                    skipped.append(f"{file_path} [local/web read error: {exc}]")
+                    continue
+
             try:
-                temperature = int(name.replace("Gibbs_", "").replace("K.csv", ""))
-                tmp = pd.read_csv(
-                    path,
-                    usecols=["Co", "Cr", "Fe", "Ni", "G_LIQ", "G_FCC"],
-                )
-                tmp["T"] = temperature
+                tmp = clean_gibbs_dataframe(tmp)
+                tmp["T"] = int(temperature)
                 frames.append(tmp)
             except Exception as exc:
-                skipped.append(f"{name}: {exc}")
+                skipped.append(f"{file_path} [data validation error: {exc}]")
+                continue
 
         if not frames:
-            raise ValueError("No valid Gibbs CSV files could be loaded.")
+            raise FileNotFoundError(
+                "No valid Gibbs CSV files were found. "
+                "Check folder path, temperature range, and filename pattern `Gibbs_<T>K.csv`. "
+                f"Current folder: `{csv_folder_value}`. "
+                "The first skipped/read errors are:\n"
+                + "\n".join(f"- {item}" for item in skipped[:20])
+            )
 
         df = pd.concat(frames, ignore_index=True)
         for column in ["Co", "Cr", "Fe", "Ni", "G_LIQ", "G_FCC", "T"]:
@@ -97,6 +164,7 @@ def _(glob, linalg, make_subplots, np, os, pd, go):
         df = df.dropna(subset=["Co", "Cr", "Fe", "Ni", "G_LIQ", "G_FCC", "T"]).copy()
         df["T"] = df["T"].astype(int)
         df.attrs["skipped_files"] = skipped
+        df.attrs["source_folder"] = csv_folder_value
         return df
 
 
@@ -505,16 +573,20 @@ def _(glob, linalg, make_subplots, np, os, pd, go):
         load_all_data,
         plot_unified_factor_matrices,
         run_cpd_pair,
+        safe_numeric,
     )
 
 
 @app.cell
-def _(DEFAULT_CSV_DIR, mo):
+def _(mo):
     csv_dir_input = mo.ui.text(
-        value=DEFAULT_CSV_DIR,
+        value="https://subediupadesh.github.io/laserheattensor/csv_files/",
         label="CSV folder",
         full_width=True,
     )
+    T_min_input = mo.ui.number(value=300, step=100, label="Minimum temperature [K]")
+    T_max_input = mo.ui.number(value=3300, step=100, label="Maximum temperature [K]")
+    T_step_input = mo.ui.number(value=100, step=100, label="Temperature step [K]")
     rank_slider = mo.ui.slider(
         start=1,
         stop=12,
@@ -533,23 +605,59 @@ def _(DEFAULT_CSV_DIR, mo):
         label="🚀 Run Factor Matrix CPD for LIQUID and FCC"
     )
 
-    controls_panel = mo.vstack(
-        [
-            mo.md("## Controls"),
-            csv_dir_input,
-            rank_slider,
-            max_iter_slider,
-            run_cpd_button,
-        ]
+    controls_panel = mo.sidebar(
+        mo.vstack(
+            [
+                mo.md("## Data settings"),
+                csv_dir_input,
+                T_min_input,
+                T_max_input,
+                T_step_input,
+                mo.md("## CPD settings"),
+                rank_slider,
+                max_iter_slider,
+                run_cpd_button,
+            ],
+            gap=1,
+        )
     )
     controls_panel
-    return csv_dir_input, max_iter_slider, rank_slider, run_cpd_button
-
+    return (
+        T_max_input,
+        T_min_input,
+        T_step_input,
+        csv_dir_input,
+        max_iter_slider,
+        rank_slider,
+        run_cpd_button,
+    )
 
 @app.cell
-def _(build_tensor_data, csv_dir_input, load_all_data, mo, pd):
+def _(
+    T_max_input,
+    T_min_input,
+    T_step_input,
+    build_tensor_data,
+    csv_dir_input,
+    load_all_data,
+    mo,
+    pd,
+    safe_numeric,
+):
+    T_min_value = int(safe_numeric(T_min_input.value, 300))
+    T_max_value = int(safe_numeric(T_max_input.value, 3300))
+    T_step_value = int(safe_numeric(T_step_input.value, 100))
+
+    if T_step_value <= 0:
+        T_step_value = 100
+
     try:
-        loaded_df = load_all_data(csv_dir_input.value)
+        loaded_df = load_all_data(
+            csv_dir_input.value,
+            T_min_value,
+            T_max_value,
+            T_step_value,
+        )
         tdt_data = build_tensor_data(loaded_df)
         skipped_warning = loaded_df.attrs.get("skipped_files", [])
     except Exception as data_error:
@@ -564,7 +672,11 @@ def _(build_tensor_data, csv_dir_input, load_all_data, mo, pd):
     )
 
     display_blocks = [
-        mo.md("## Loaded tensor data"),
+        mo.md(
+            f"## Loaded tensor data\n\n"
+            f"Source: `{csv_dir_input.value}`  \n"
+            f"Temperature request: `{T_min_value}–{T_max_value} K`, step `{T_step_value} K`"
+        ),
         metrics_df,
     ]
     if skipped_warning:
