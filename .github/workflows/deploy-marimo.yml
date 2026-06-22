@@ -41,9 +41,14 @@ jobs:
         run: |
           uvx marimo export html-wasm 0_Thermodynamic_Data_Tensor/MultiAppTest.py -o _site/MultiApp.html --mode run
 
+      - name: Export Tensor Factorization app
+        run: |
+          uvx marimo export html-wasm 0_Thermodynamic_Data_Tensor/Tensor_Decomposition_Factor_Matrices_Marimo.py -o _site/Tensor_Factorization.html --mode run
+
       - name: Export ML Predictions app
         run: |
           uvx marimo export html-wasm 3_ML_Model/Ablation_Calc_Marimo.py -o _site/ML_Predictions.html --mode run
+
 
       - name: Copy thermodynamic CSV files
         run: |
@@ -216,7 +221,7 @@ jobs:
               <div class="buttons">
                 <a class="button" href="./8D_ParallelPlot.html">💡 8D TDT Viz</a>
                 <a class="button" href="./Sunburst_Multiring.html">🌞 Multi-Ring Chart</a>
-                <a class="button" href="./MultiApp.html">🧪 MultiAppTest</a>
+                <a class="button" href="./Tensor_Factorization.html">🧪 TensorFactorization</a>
                 <a class="button" href="./ML_Predictions.html">🎛️ Attention Surrogate</a>
               </div>
 
