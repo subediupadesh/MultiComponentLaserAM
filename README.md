@@ -70,7 +70,7 @@ Interactive visualization and ablation assessment
 ```text
 .
 ├── 0_Thermodynamic_Data_Tensor
-├── 1_Simulation_Results
+├── 1_Simulation_Files
 ├── 2_Post_Processing
 ├── 3_ML_Model
 ├── 4_Ablation_Assessment
